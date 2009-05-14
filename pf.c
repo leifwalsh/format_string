@@ -1,3 +1,9 @@
+/*
+   This is an extremely simple program to demonstrate and test the format
+   string attack generator.  Two function calls are made just to be sure it
+   works with longer call stacks.
+   */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

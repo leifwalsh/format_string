@@ -1,0 +1,146 @@
+gen_attack.pl
+
+Description
+===========
+
+Creates a format string attack that can be used to exploit a format string
+vulnerability in a C or C++ program.
+
+Usage
+=====
+
+   ./gen_attack.pl <victim_binary> <return_address_location> <buffer_location>
+
+WARNING: You MUST edit inject() so that it works with your program, or this
+program will not work.  See below for details.
+
+Theory
+======
+
+This program is not very complicated, just careful.  It's largely based on
+scut's excellent Exploiting Format String Vulnerabilities [1].
+
+First, it injects strings of the form AAAABBBB|%u...|%08x| until the last bit
+(%08x) shows "41414141" (ASCII "AAAA").  To be pedantic, it should be more
+careful (and look for things like "42414141" and such), but this was a quick
+and dirty job.  This tells us how many words we need to pop off the stack
+to hit our own format string (if our format string is not on the stack, this
+will probably segfault the program...I think there's a way around it but I
+haven't played with it yet).
+
+Next, it does a little math (based on the format strings we're going to use
+later) to figure out how many more items need to be popped before we reach
+the end of our string of popping format instructions.
+
+Finally, it takes the length of this prefix of a bunch of popping
+instructions, along with the location of the return address, and the location
+of the format string in memory, and creates a string that contains the
+payload (just change $payload to your favorite shellcode) and writes the
+location of the beginning of that payload to the return address.  If all is
+well, you'll jump right to it.  The method for doing this is described in
+scut's paper [1], so just go read that, I won't reproduce it here.
+
+Usage, for real
+===============
+
+First, pick some shellcode you want to run.  You can find archives of the
+stuff for almost any architecture strewn around the internet.  There's some
+BSD shellcode below because that's what I was working on when I wrote it.
+Put this in $payload.
+
+Next, find a format string exploit in the victim program, and edit inject()
+below so that it will inject $string into a printf()-like function in $prog.
+If you are using the sample program that came with this script, you can just
+run `$prog "$script"`.  Make sure you return the output of this printing
+business, because we need to be able to look at it to determine the number
+of words to pop off the stack.
+
+Now, compile your program with debugging symbols and open it in gdb.  Set a
+breakpoint near your vulnerability and start it up.  Find the return address
+location with "info frame" (look for "eip" under Saved registers, at least on
+x86), and the location of the buffer with "print /x &buffer[0]".  For the
+sample program included, this would look like the following:
+
+   $ gcc -g3 -o pf pf.c
+   $ gdb pf
+    < gdb preamble >
+   (gdb) break 13 
+   Breakpoint 1 at 0x804860d: file pf.c, line 13.
+   (gdb) run a
+   Starting program: /home/leif/pf a
+
+   Breakpoint 1, foo (f=0xbfbfedf6 "a") at pf.c:13
+   13	    printf(buf);
+   (gdb) info frame
+   Stack level 0, frame at 0xbfbfec80:
+   eip = 0x804860d in foo (pf.c:13); saved eip 0x80485a1
+   called by frame at 0xbfbfeca0
+   source language c.
+   Arglist at 0xbfbfec78, args: f=0xbfbfedf6 "a"
+   Locals at 0xbfbfec78, Previous frame's sp is 0xbfbfec80
+   Saved registers:
+    ebp at 0xbfbfec78, eip at 0xbfbfec7c  <=====================
+   (gdb) print /x &buf[0]
+   $1 = 0xbfbfdc70  <===========================================
+
+You'll want to save the two addresses pointed to just there.  A python
+interpreter is nice because it'll do hex->dec conversion for you.  Now, we
+need the stack offset that gdb adds to programs when it runs them.  To do
+this, just use the sample program, even if you're breaking something else.
+If you run it, it'll cleverly give you the address of buf, which we can
+subtract from the one we got from gdb (if you're breaking something else, you
+also need to run pf.c in gdb) to find this offset (which you then subtract
+from each of the addresses you got from gdb for your victim program).
+
+That's confusing.  Here:
+
+   $ ./pf a
+   a
+   main=0x080485a8
+   system=0x08048414
+   buf=0xbfbfdc40
+   a
+
+So, in gdb, buf was 0xbfbfdc70, but as a standalone binary, it was 0xbfbfdc40
+(this is without recompilation, by the way).  Now, take this difference
+(0x30) and subtract it from the return address (eip) and buffer locations
+from before.
+
+Now we're pretty much ready.  Take these numbers, after subtracting the
+offset, turn them into decimal, and use them as arguments to this script,
+according to the usage above.  It will print out a bunch of stuff to stderr,
+and only the attack string to stdout, so you can attack pf.c like this:
+
+   $ ./pf $(./gen_attack.pl pf nnnnnnnn nnnnnnnn)
+
+One caveat:  For pf.c, at least, since the format string is provided in argv,
+when it changes length, the stack will move around, so those memory locations
+will move as well.  You'll need to calculate initial addresses like above,
+run this script to get an attack string, and then recalculate the addresses
+with a dummy format string of the same length as the attack string.  Use
+these addresses in this script to get a new attack string, and use that to
+attack.  The attack string will only vary by a maximum of a few bytes when
+you change the addresses, so it should converge after at most two re-tries.
+
+If you're on a big-endian machine, go read the paper [1] and then change the
+code below that writes addresses into the format string.
+
+References
+==========
+
+[1] scut, team teso.  Exploiting Format String Vulnerabilities.
+   http://doc.bughunter.net/format-string/exploit-fs.html
+
+That's kind of it.  I read a lot of other things, but just for understanding;
+all of the algorithm comes from that paper.
+
+Authors
+=======
+
+Leif Walsh <leif.walsh@gmail.com> (http://leifwalsh.com)
+
+Bugs
+====
+
+Definitely.
+
