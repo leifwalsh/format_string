@@ -142,5 +142,6 @@ Leif Walsh <leif.walsh@gmail.com> (http://leifwalsh.com)
 Bugs
 ====
 
-Definitely.
+Definitely.  I've only tested this on pf.c and on one freebsd x86 machine so
+far.  I'm convinced it won't work in most cases.
 
